@@ -17,7 +17,8 @@ import time
 import platform
 import re
 import pathlib
-import psutil
+
+# import psutil
 import math
 import matplotlib as mpl
 
@@ -30,26 +31,40 @@ CUR_FILE = os.path.abspath(__file__)
 CUR_DIR = os.path.dirname(CUR_FILE)
 _NS_IN_ONE_S = 1000000000
 
-LIBRARIES = {
+# baseline is the first one.
+LIBRARIES_COLORS = {"json": "#74c476", "orjson": "#6baed6", "ssrjson": "#fd8d3c"}
+LIBRARIES: dict[str, dict[str, Callable[[str | bytes], Any]]] = {
     "dumps": {
+        "json.dumps": json.dumps,
         "orjson.dumps+decode": lambda x: orjson.dumps(x).decode("utf-8"),
         "ssrjson.dumps": ssrjson.dumps,
     },
+    "dumps(indented2)": {
+        "json.dumps": lambda x: json.dumps(x, indent=2),
+        "orjson.dumps+decode": lambda x: orjson.dumps(
+            x, option=orjson.OPT_INDENT_2
+        ).decode("utf-8"),
+        "ssrjson.dumps": lambda x: ssrjson.dumps(x, indent=2),
+    },
     "dumps_to_bytes": {
+        "json.dumps": lambda x: json.dumps(x).encode("utf-8"),
         "orjson.dumps": orjson.dumps,
         "ssrjson.dumps_to_bytes": ssrjson.dumps_to_bytes,
     },
     "loads(str)": {
+        "json.loads": json.loads,
         "orjson.loads": orjson.loads,
         "ssrjson.loads": ssrjson.loads,
     },
     "loads(bytes)": {
+        "json.loads": json.loads,
         "orjson.loads": orjson.loads,
         "ssrjson.loads": ssrjson.loads,
     },
 }
+CATEGORIES = LIBRARIES.keys()
 
-INDEXES = ["elapsed", "user_cpu"]
+INDEXES = ["elapsed"]
 
 
 def benchmark(repeat_time: int, func, *args):
@@ -116,7 +131,7 @@ def _run_benchmark(
     curfile_obj: defaultdict[str, Any],
     repeat_times: int,
     input_data: str | bytes,
-    mode: str,  # "dumps", "dumps_to_bytes", "loads(str)", "loads(bytes)"
+    mode: str,  # "dumps", etc
 ):
     print(f"Running benchmark for {mode}")
     funcs = LIBRARIES[mode]
@@ -129,67 +144,69 @@ def _run_benchmark(
             return benchmark_unicode_arg
         return benchmark
 
-    process = psutil.Process()
+    # process = psutil.Process()
 
     for name, func in funcs.items():
         benchmark_func = pick_benchmark_func()
         gc.collect()
         t0 = time.perf_counter()
-        cpu_times_before = process.cpu_times()
-        ctx_before = process.num_ctx_switches()
-        mem_before = process.memory_info().rss
+        # cpu_times_before = process.cpu_times()
+        # ctx_before = process.num_ctx_switches()
+        # mem_before = process.memory_info().rss
 
         elapsed = benchmark_func(repeat_times, func, input_data)
 
         # End measuring
         t1 = time.perf_counter()
-        cpu_times_after = process.cpu_times()
-        ctx_after = process.num_ctx_switches()
+        # cpu_times_after = process.cpu_times()
+        # ctx_after = process.num_ctx_switches()
 
-        user_cpu = cpu_times_after.user - cpu_times_before.user
-        system_cpu = cpu_times_after.system - cpu_times_before.system
-        voluntary_ctx = ctx_after.voluntary - ctx_before.voluntary
-        involuntary_ctx = ctx_after.involuntary - ctx_before.involuntary
-        mem_after = process.memory_info().rss
+        # user_cpu = cpu_times_after.user - cpu_times_before.user
+        # system_cpu = cpu_times_after.system - cpu_times_before.system
+        # voluntary_ctx = ctx_after.voluntary - ctx_before.voluntary
+        # involuntary_ctx = ctx_after.involuntary - ctx_before.involuntary
+        # mem_after = process.memory_info().rss
 
         cur_obj[name] = {
             "elapsed": elapsed,
-            "user_cpu": user_cpu,
-            "system_cpu": system_cpu,
-            "ctx_vol": voluntary_ctx,
-            "ctx_invol": involuntary_ctx,
-            "mem_diff": mem_after - mem_before,
+            # "user_cpu": user_cpu,
+            # "system_cpu": system_cpu,
+            # "ctx_vol": voluntary_ctx,
+            # "ctx_invol": involuntary_ctx,
+            # "mem_diff": mem_after - mem_before,
             "wall_time": t1 - t0,
         }
 
-    ssrjson_name = next(k for k in funcs if k.startswith("ssrjson"))
-    ssrjson_func = funcs[ssrjson_name]
-    if "dumps" in mode:
-        data_obj = json.loads(input_data)
-        output = ssrjson_func(data_obj)
-        if "bytes" in mode:
-            size = len(output)
-        else:
-            _, size, _, _ = ssrjson.inspect_pyunicode(output)
-    else:
-        size = (
-            len(input_data)
-            if isinstance(input_data, bytes)
-            else ssrjson.inspect_pyunicode(input_data)[1]
-        )
-
-    orjson_name = next(k for k in funcs if k.startswith("orjson"))
-    orjson_time = cur_obj[orjson_name]
-    ssrjson_time = cur_obj[ssrjson_name]
-
-    for index in INDEXES:
-        if orjson_time[index] == 0:
-            cur_obj[f"{index}_ratio"] = math.inf
-        else:
-            cur_obj[f"{index}_ratio"] = ssrjson_time[index] / orjson_time[index]
-    cur_obj["ssrjson_bytes_per_sec"] = ssrjson.dumps(
-        size * repeat_times / (ssrjson_time["elapsed"] / _NS_IN_ONE_S)
-    )
+    funcs_iter = iter(funcs.items())
+    baseline_name, _ = next(funcs_iter)
+    baseline_data = cur_obj[baseline_name]
+    for name, func in funcs_iter:
+        if name.startswith("ssrjson"):
+            # debug use, bytes per sec
+            if "dumps" in mode:
+                data_obj = json.loads(input_data)
+                output = func(data_obj)
+                if "bytes" in mode:
+                    size = len(output)
+                else:
+                    _, size, _, _ = ssrjson.inspect_pyunicode(output)
+            else:
+                size = (
+                    len(input_data)
+                    if isinstance(input_data, bytes)
+                    else ssrjson.inspect_pyunicode(input_data)[1]
+                )
+            cur_obj["ssrjson_bytes_per_sec"] = ssrjson.dumps(
+                size * repeat_times / (cur_obj[name]["elapsed"] / _NS_IN_ONE_S)
+            )
+        for index in INDEXES:
+            basename = name.split(".")[0]
+            if baseline_data[index] == 0:
+                cur_obj[f"{basename}_{index}_ratio"] = math.inf
+            else:
+                cur_obj[f"{basename}_{index}_ratio"] = (
+                    baseline_data[index] / cur_obj[name][index]
+                )
 
 
 def run_file_benchmark(
@@ -258,44 +275,44 @@ def get_mem_total() -> str:
 
 
 def get_ratio_color(ratio: float) -> str:
-    if ratio <= 0.6:
-        return "#d63031"  # deep coral red
-    elif ratio <= 0.8:
-        return "#e67e22"  # warm orange
+    if ratio < 1:
+        return "#d63031"  # red (worse than baseline)
     elif ratio == 1:
-        return "black"
-    elif ratio <= 1.2:
-        return "#f1c40f"  # strong yellow
-    elif ratio <= 1.5:
-        return "#27ae60"  # green
+        return "black"  # black (baseline)
+    elif ratio < 2:
+        return "#e67e22"  # orange (similar/slightly better)
+    elif ratio < 4:
+        return "#f1c40f"  # yellow (decent improvement)
+    elif ratio < 8:
+        return "#27ae60"  # green (good)
+    elif ratio < 16:
+        return "#2980b9"  # blue (great)
     else:
-        return "#2980b9"  # blue (rare)
+        return "#8e44ad"  # purple (exceptional)
 
 
 def plot_relative_ops(data: dict, doc_name: str, index_s: str):
-    categories = ["dumps", "dumps_to_bytes", "loads(str)", "loads(bytes)"]
-    libraries = ["orjson", "ssrjson"]
-    colors = {"orjson": "#6baed6", "ssrjson": "#fd8d3c"}
-
-    total_groups = len(categories)
-    bar_width = 0.35
-    x = list(range(total_groups))
-
     # Prepare grouped values
-    orjson_vals = [1.0 for _ in categories]
-    ssrjson_vals = [1 / data[cat][f"{index_s}_ratio"] for cat in categories]
-    values = [orjson_vals, ssrjson_vals]
+    json_vals = [1.0 for _ in CATEGORIES]
+    orjson_vals = [data[cat][f"orjson_{index_s}_ratio"] for cat in CATEGORIES]
+    ssrjson_vals = [data[cat][f"ssrjson_{index_s}_ratio"] for cat in CATEGORIES]
+    values = [json_vals, orjson_vals, ssrjson_vals]
 
     fig, ax = plt.subplots(figsize=(10, 4))
     bars = []
-    for i in range(len(libraries)):
+
+    bar_width = 0.3
+    group_width = bar_width * len(LIBRARIES_COLORS) + 0.1  # spacing = 0.1
+    x = [i * group_width for i in range(len(CATEGORIES))]
+
+    for i, (name, color) in enumerate(LIBRARIES_COLORS.items()):
         bars.append(
             ax.bar(
                 [j + i * bar_width for j in x],
                 values[i],
                 width=bar_width,
-                label=libraries[i],
-                color=colors[libraries[i]],
+                label=name,
+                color=color,
             )
         )
 
@@ -314,14 +331,15 @@ def plot_relative_ops(data: dict, doc_name: str, index_s: str):
 
     # Formatting
     ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
-    ax.set_xticks(x)
-    ax.set_xticklabels(categories, fontsize=9)
+    middle = len(LIBRARIES_COLORS) // 2
+    ax.set_xticks([j + middle * bar_width for j in x])
+    ax.set_xticklabels(CATEGORIES, fontsize=9)
     ax.set_ylim(0, max(ssrjson_vals + [1.0]) * 1.25)
     ax.set_ylabel("ratio", fontsize=9)
     ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1fx"))
     fig.text(
         0.5,
-        0.01,
+        0,
         "Higher is better",
         ha="center",
         va="bottom",
@@ -437,7 +455,50 @@ def generate_report(result: dict[str, dict[str, Any]], file: str):
     )
 
 
-def run_benchmark(process_bytes: int, is_stdout: bool = False):
+def generate_report_markdown(result: dict[str, dict[str, Any]], file: str):
+    file = file.removesuffix(".json")
+    report_name = f"{file}_report.md"
+    report_folder = os.path.join(CUR_DIR, f"{file}_report")
+
+    # mkdir
+    if not os.path.exists(report_folder):
+        os.makedirs(report_folder)
+
+    with open(os.path.join(CUR_DIR, "template.md"), "r") as f:
+        template = f.read()
+    template = template.format(
+        REV=file.removeprefix("benchmark_result_").removesuffix(".json"),
+        TIME=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        OS=f"{platform.system()} {platform.machine()}",
+        PYTHON=sys.version,
+        ORJSON_VER=orjson.__version__,
+        SIMD_FLAGS=ssrjson.get_current_features(),
+        CHIPSET=get_cpu_name(),
+        MEM=get_mem_total(),
+    )
+
+    for index_s in INDEXES:
+        template += f"\n\n## {index_s}\n\n"
+        for bench_file in get_benchmark_files():
+            print(f"Processing {bench_file.name}")
+            with open(
+                os.path.join(report_folder, bench_file.name + ".svg"), "wb"
+            ) as svg_file:
+                svg_file.write(
+                    plot_relative_ops(
+                        result[bench_file.name],
+                        bench_file.name,
+                        index_s,
+                    ).getvalue()
+                )
+            # add svg
+            template += f"![{bench_file.name}](./{bench_file.name}.svg)\n\n"
+
+    with open(os.path.join(report_folder, report_name), "w") as f:
+        f.write(template)
+
+
+def run_benchmark(process_bytes: int):
     file = get_real_output_file_name()
     if os.path.exists(file):
         os.remove(file)
@@ -451,9 +512,7 @@ def run_benchmark(process_bytes: int, is_stdout: bool = False):
 
     with open(f"{file}", "w", encoding="utf-8") as f:
         f.write(output_result)
-    if is_stdout:
-        print(output_result)
-    generate_report(result, file)
+    return result, file
 
 
 def main():
@@ -465,23 +524,33 @@ def main():
         "-f", "--file", help="record JSON file", required=False, default=None
     )
     parser.add_argument(
+        "-m",
+        "--markdown",
+        help="Generate markdown report",
+        required=False,
+        action="store_true",
+    )
+    parser.add_argument(
         "--process-bytes",
         help="Total process bytes per test, default 1e8",
         required=False,
         default=100050000,
         type=int,
     )
-    parser.add_argument(
-        "--stdout", help="Print to stdout", required=False, action="store_true"
-    )
     args = parser.parse_args()
 
     if args.file:
         with open(args.file, "r") as f:
             j = json.load(f)
-        generate_report(j, args.file.split("/")[-1])
+        file = args.file.split("/")[-1]
     else:
-        run_benchmark(args.process_bytes, args.stdout)
+        j, file = run_benchmark(args.process_bytes, True)
+        file = file.split("/")[-1]
+
+    if args.markdown:
+        generate_report_markdown(j, file)
+    else:
+        generate_report(j, file)
 
 
 if __name__ == "__main__":

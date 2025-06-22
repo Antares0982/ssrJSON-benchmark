@@ -19,6 +19,12 @@ Running `benchmark.py` will generate a report
 python benchmark.py
 ```
 
+## Benchmark options
+
+- `-m` output in Markdown instead of PDF.
+- `-f <json_path>` used exists benchmark json result.
+- `--process-bytes <bytes_num>` Total process bytes per test, default 1e8.
+
 ## Notes
 
 * The ssrJSON built with the `BUILD_BENCHMARK` option includes several additional C functions specifically designed for executing benchmarks. These functions utilize high-precision timing APIs, and within the loop, only the time spent on the actual `PyObject_Call` invocations is measured.
