@@ -6,3 +6,5 @@
 !template.md
 !requirements.txt
 !README.md
+!flake.lock
+!*.nix
