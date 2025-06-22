@@ -5,11 +5,11 @@ import gc
 import json
 from collections import defaultdict
 from typing import Any, Callable
-from matplotlib import ticker
 import matplotlib.pyplot as plt
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import A4
 from svglib.svglib import svg2rlg
+from svglib.fonts import FontMap
 from reportlab.graphics import renderPDF
 from typing import List
 import io
@@ -27,9 +27,18 @@ mpl.rcParams["svg.fonttype"] = "none"
 import orjson
 import ssrjson
 
+font_map = FontMap()
+font_map.register_default_fonts()
+
 CUR_FILE = os.path.abspath(__file__)
 CUR_DIR = os.path.dirname(CUR_FILE)
 _NS_IN_ONE_S = 1000000000
+
+PDF_PAGE_SIZE = A4
+PDF_HEADING_FONT = "Helvetica-Bold"
+# workaround for matplotlib using 700 to represent bold font, but svg2rlg using 700 as normal.
+font_map.register_font("Helvetica", weight="700", rlgFontName="Helvetica-Bold")
+PDF_TEXT_FONT = "Courier"
 
 # baseline is the first one.
 LIBRARIES_COLORS = {"json": "#74c476", "orjson": "#6baed6", "ssrjson": "#fd8d3c"}
@@ -282,7 +291,7 @@ def get_ratio_color(ratio: float) -> str:
     elif ratio < 2:
         return "#e67e22"  # orange (similar/slightly better)
     elif ratio < 4:
-        return "#f1c40f"  # yellow (decent improvement)
+        return "#f39c12"  # amber (decent improvement)
     elif ratio < 8:
         return "#27ae60"  # green (good)
     elif ratio < 16:
@@ -291,52 +300,81 @@ def get_ratio_color(ratio: float) -> str:
         return "#8e44ad"  # purple (exceptional)
 
 
-def plot_relative_ops(data: dict, doc_name: str, index_s: str):
-    # Prepare grouped values
-    json_vals = [1.0 for _ in CATEGORIES]
-    orjson_vals = [data[cat][f"orjson_{index_s}_ratio"] for cat in CATEGORIES]
-    ssrjson_vals = [data[cat][f"ssrjson_{index_s}_ratio"] for cat in CATEGORIES]
-    values = [json_vals, orjson_vals, ssrjson_vals]
+def plot_relative_ops(data: dict, doc_name: str, index_s: str) -> io.BytesIO:
+    libs = list(LIBRARIES_COLORS.keys())
+    colors = [LIBRARIES_COLORS[n] for n in libs]
+    n = len(CATEGORIES)
+    bar_width = 0.2
+    inner_pad = 0
 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    bars = []
+    fig, axs = plt.subplots(
+        1,
+        n,
+        figsize=(4 * n, 6),
+        sharey=False,
+        tight_layout=True,
+        gridspec_kw={"wspace": 0},
+    )
 
-    bar_width = 0.3
-    group_width = bar_width * len(LIBRARIES_COLORS) + 0.1  # spacing = 0.1
-    x = [i * group_width for i in range(len(CATEGORIES))]
+    x_positions = [i * (bar_width + inner_pad) for i in range(len(libs))]
 
-    for i, (name, color) in enumerate(LIBRARIES_COLORS.items()):
-        bars.append(
-            ax.bar(
-                [j + i * bar_width for j in x],
-                values[i],
-                width=bar_width,
-                label=name,
-                color=color,
-            )
-        )
+    for ax, cat in zip(axs, CATEGORIES):
+        vals = [1.0] + [data[cat][f"{name}_{index_s}_ratio"] for name in libs[1:]]
 
-    # Annotate bars
-    for bars, vals in zip(bars, values):
-        for bar, val in zip(bars, vals):
+        for xi, val, col in zip(x_positions, vals, colors):
+            ax.bar(xi, val, width=bar_width, color=col)
             ax.text(
-                bar.get_x() + bar.get_width() / 2,
+                xi,
                 val + 0.05,
                 f"{val:.2f}x",
                 ha="center",
                 va="bottom",
-                fontsize=7,
+                fontsize=9,
                 color=get_ratio_color(val),
             )
 
-    # Formatting
-    ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
-    middle = len(LIBRARIES_COLORS) // 2
-    ax.set_xticks([j + middle * bar_width for j in x])
-    ax.set_xticklabels(CATEGORIES, fontsize=9)
-    ax.set_ylim(0, max(ssrjson_vals + [1.0]) * 1.25)
-    ax.set_ylabel("ratio", fontsize=9)
-    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1fx"))
+        # baseline line
+        ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
+        # height = 1.1 * max bar height
+        ax.set_ylim(0, max(vals + [1.0]) * 1.1)
+
+        # hide all tick
+        ax.tick_params(
+            axis="both",
+            which="both",
+            left=False,
+            bottom=False,
+            labelleft=False,
+            labelbottom=False,
+        )
+
+        # and spine
+        for spine in ("left", "top", "right"):
+            ax.spines[spine].set_visible(False)
+
+        ax.set_xlabel(cat, fontsize=10, labelpad=6)
+
+    fig.suptitle(
+        doc_name,
+        fontsize=20,
+        fontweight="bold",
+        y=0.98,
+    )
+
+    # color legend
+    legend_elements = [
+        plt.Line2D([0], [0], color=col, lw=4, label=name)
+        for name, col in LIBRARIES_COLORS.items()
+    ]
+    fig.legend(
+        handles=legend_elements,
+        loc="upper right",
+        bbox_to_anchor=(0.98, 0.95),
+        ncol=len(libs),
+        fontsize=14,
+        frameon=False,
+    )
+
     fig.text(
         0.5,
         0,
@@ -348,70 +386,65 @@ def plot_relative_ops(data: dict, doc_name: str, index_s: str):
         color="#555555",
     )
 
-    for spine in ["top", "right"]:
-        ax.spines[spine].set_visible(False)
-
-    ax.legend(loc="upper right", frameon=False, fontsize=8)
-    ax.set_title(doc_name, fontsize=11)
-
-    plt.tight_layout()
-    rep = io.BytesIO()
-    plt.savefig(rep, format="svg")
+    buf = io.BytesIO()
+    plt.savefig(buf, format="svg", bbox_inches="tight")
+    buf.seek(0)
     plt.close(fig)
-
-    return rep
+    return buf
 
 
 def generate_pdf_report(
     figures: List[List[io.BytesIO]], header_text: str, output_pdf_path: str
-):
-    c = canvas.Canvas(output_pdf_path, pagesize=letter)
-    width, height = letter
+) -> str:
+    c = canvas.Canvas(output_pdf_path, pagesize=PDF_PAGE_SIZE)
+    width, height = PDF_PAGE_SIZE
 
-    c.setFont("Helvetica-Bold", 16)
-    text_obj = c.beginText()
-    text_obj.setTextOrigin(40, height - 50)
-    text_obj.setFont("Courier", 10)
-
+    # heading info
+    c.setFont(PDF_HEADING_FONT, 16)
+    text_obj = c.beginText(40, height - 50)
+    text_obj.setFont(PDF_TEXT_FONT, 10)
     for line in header_text.splitlines():
         text_obj.textLine(line)
-
     c.drawText(text_obj)
+
     header_lines = header_text.count("\n") + 1
-    header_height = header_lines * 14
-    y_pos = height - 60 - header_height
+    header_height = header_lines * 14 + 10
+    # subheading spacing = 30
+    y_pos = height - header_height - 30
+    bottom_margin = 20
+    vertical_gap = 20
 
     for name, figs in zip(INDEXES, figures):
         text_obj = c.beginText()
         text_obj.setTextOrigin(40, y_pos)
-        text_obj.setFont("Helvetica-Bold", 14)
+        text_obj.setFont(PDF_HEADING_FONT, 14)
         text_obj.textLine(f"{name}")
         c.drawText(text_obj)
         c.bookmarkHorizontal(name, 0, y_pos + 20)
         c.addOutlineEntry(name, name, level=0)
         y_pos -= 20
         for svg_io in figs:
-
             svg_io.seek(0)
+            drawing = svg2rlg(svg_io, font_map=font_map)
 
-            drawing = svg2rlg(svg_io)
-
-            available_width = width - 80
-            scale = available_width / drawing.width
+            avail_w = width - 80
+            scale = avail_w / drawing.width
             drawing.width *= scale
             drawing.height *= scale
             drawing.scale(scale, scale)
+
+            img_h = drawing.height
+            # no enough space
+            if y_pos - img_h - vertical_gap < bottom_margin:
+                c.showPage()
+                y_pos = height - bottom_margin
 
             c.setStrokeColorRGB(0.9, 0.9, 0.9)
             c.setLineWidth(0.4)
             c.line(40, y_pos, width - 40, y_pos)
 
-            renderPDF.draw(drawing, c, 40, y_pos - drawing.height)
-            y_pos -= drawing.height + 40
-
-            if y_pos < 100:
-                c.showPage()
-                y_pos = height - 50
+            renderPDF.draw(drawing, c, 40, y_pos - img_h)
+            y_pos -= img_h + vertical_gap
 
     c.save()
     return output_pdf_path
