@@ -2,6 +2,16 @@
 
 The [ssrJSON](https://github.com/Antares0982/ssrjson) benchmark repository.
 
+## Benchmark Results
+
+The benchmark results can be found in [results](results). Contributing your benchmark result is welcomed.
+
+Quick jump for
+
+* [x86-64-v2, SSE4.2](results/SSE4.2)
+* [x86-64-v3, AVX2](results/AVX2)
+* [x86-64-v4, AVX512](results/AVX512)
+
 ## Usage
 
 ssrJSON is required to be built with `BUILD_BENCHMARK` option on
