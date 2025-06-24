@@ -14,16 +14,16 @@ Quick jump for
 
 ## Usage
 
-ssrJSON is required to be built with `BUILD_BENCHMARK` option on
+To generate a benchmark report, you need to build `ssrJSON` with the `BUILD_BENCHMARK` option enabled:
 
 ```bash
-mkdir build
-cd build
-cmake -DBUILD_BENCHMARK=ON ..
-cmake --build .
+CC=clang CXX=clang++ cmake -B build . -DBUILD_BENCHMARK=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
-Running `benchmark.py` will generate a report
+After building, copy the resulting `ssrJSON.so` file from the build directory to the root of this project.
+
+Then, run the benchmark script:
 
 ```bash
 python benchmark.py
