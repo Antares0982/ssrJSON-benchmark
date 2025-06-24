@@ -2,18 +2,28 @@
 
 The [ssrJSON](https://github.com/Antares0982/ssrjson) benchmark repository.
 
+## Benchmark Results
+
+The benchmark results can be found in [results](results). Contributing your benchmark result is welcomed.
+
+Quick jump for
+
+* [x86-64-v2, SSE4.2](results/SSE4.2)
+* [x86-64-v3, AVX2](results/AVX2)
+* [x86-64-v4, AVX512](results/AVX512)
+
 ## Usage
 
-ssrJSON is required to be built with `BUILD_BENCHMARK` option on
+To generate a benchmark report, you need to build `ssrJSON` with the `BUILD_BENCHMARK` option enabled:
 
 ```bash
-mkdir build
-cd build
-cmake -DBUILD_BENCHMARK=ON ..
-cmake --build .
+CC=clang CXX=clang++ cmake -B build . -DBUILD_BENCHMARK=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
-Running `benchmark.py` will generate a report
+After building, copy the resulting `ssrJSON.so` file from the build directory to the root of this project.
+
+Then, run the benchmark script:
 
 ```bash
 python benchmark.py
@@ -27,6 +37,7 @@ python benchmark.py
 
 ## Notes
 
+* This repository conducts benchmarking using json, orjson, and ssrJSON. The `dumps` benchmark produces str objects, comparing three operations: `json.dumps`, `orjson.dumps` followed by decode, and `ssrjson.dumps`. The `dumps_to_bytes` benchmark produces bytes objects, comparing three functions: `json.dumps` followed by encode, `orjson.dumps`, and `ssrjson.dumps_to_bytes`.
 * The ssrJSON built with the `BUILD_BENCHMARK` option includes several additional C functions specifically designed for executing benchmarks. These functions utilize high-precision timing APIs, and within the loop, only the time spent on the actual `PyObject_Call` invocations is measured.
 * When orjson handles non-ASCII strings, if the cache of the `PyUnicodeObject`’s UTF-8 representation does not exist, it invokes the `PyUnicode_AsUTF8AndSize` function to obtain the UTF-8 encoding. This function then caches the UTF-8 representation within the `PyUnicodeObject`. If the same `PyUnicodeObject` undergoes repeated encode-decode operations, subsequent calls after the initial one will execute more quickly due to this caching. However, in real-world production scenarios, it is uncommon to perform JSON encode-decode repeatedly on the exact same string object; even identical strings are unlikely to be the same object instance. To achieve benchmark results that better reflect practical use cases, we employ `ssrjson.run_unicode_accumulate_benchmark` and `benchmark_invalidate_dump_cache` functions, which ensure that new `PyUnicodeObject`s are different for each input every time.
 
