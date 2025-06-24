@@ -1,0 +1,48 @@
+name: Build and Deploy PDF Index
+
+on:
+  push:
+    paths:
+      - "results/**/*.pdf"
+      - ".github/workflows/page.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate index.html
+        run: |
+          mkdir -p output
+          echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Results</title></head><body><h1>Benchmark Results</h1><ul>' > output/index.html
+          find results -name "*.pdf" | sort | while read -r path; do
+            echo "<li><a href=\"${path}\">${path}</a></li>" >> output/index.html
+            mkdir -p "output/$(dirname "$path")"
+            cp "$path" "output/$path"
+          done
+          echo '</ul></body></html>' >> output/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: output
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
